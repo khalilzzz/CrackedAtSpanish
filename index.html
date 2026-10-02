@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cracked At Spanish</title>
+<style>
+  :root { --bg:#fafafa; --fg:#111; --dim:#999; --ok:#1a9e55; --line:#ddd; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --dim:#666; --ok:#3ddc84; --line:#333; } }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family:system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:16px; }
+  #stats { position:fixed; top:14px; left:0; right:0; text-align:center; font-size:13px; color:var(--dim);
+    font-variant-numeric:tabular-nums; }
+  #stats b { color:var(--fg); font-weight:600; }
+  #word { font-size:clamp(28px, 7vw, 52px); font-weight:600; text-align:center; margin-bottom:8px;
+    cursor:pointer; user-select:none; }
+  #reveal { height:22px; color:var(--dim); font-size:16px; margin-bottom:18px; }
+  #answer { width:min(420px, 100%); font-size:24px; padding:12px 14px; text-align:center;
+    border:2px solid var(--line); border-radius:10px; background:transparent; color:var(--fg); outline:none;
+    transition:border-color .15s; }
+  #answer:focus { border-color:var(--dim); }
+  #answer.ok { border-color:var(--ok); }
+  #pop { position:fixed; font-weight:700; color:var(--ok); pointer-events:none; opacity:0; }
+  #pop.go { animation:pop .6s ease-out; }
+  @keyframes pop { from { opacity:1; transform:translateY(0); } to { opacity:0; transform:translateY(-30px); } }
+  #reset { position:fixed; bottom:10px; right:14px; font-size:11px; color:var(--dim); cursor:pointer; }
+</style>
+</head>
+<body>
+<div id="stats"></div>
+<div id="word" title="click or press Esc to reveal"></div>
+<div id="reveal"></div>
+<input id="answer" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="esc = reveal">
+<div id="pop"></div>
+<div id="reset">reset</div>
+
+<script>
+  // Word files call addWords(level, text). One "english = spanish/alt" pair per line.
+  const WORDS = [];
+  function addWords(level, text) {
+    for (const line of text.split("\n")) {
+      const i = line.indexOf("=");
+      if (i < 0) continue;
+      const en = line.slice(0, i).trim();
+      const es = line.slice(i + 1).split("/").map(s => s.trim()).filter(Boolean);
+      if (en && es.length) WORDS.push({ en, es, level });
+    }
+  }
+</script>
+<script src="words_a1.js"></script>
+<script src="words_a2.js"></script>
+<script src="words_b1.js"></script>
+<script src="words_b2.js"></script>
+<script>
+  // Accent/case/punctuation-insensitive compare. Leading articles are optional.
+  function norm(s) {
+    return s.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "")
+      .replace(/[¿¡?!.,;:'"]/g, "").replace(/\s+/g, " ").trim()
+      .replace(/^(el|la|los|las|un|una|unos|unas) /, "");
+  }
+  for (const w of WORDS) w.keys = w.es.map(norm);
+  // [level, index where that level ends], e.g. [["A1", 564], ["A2", 1269], ...]
+  const BANDS = [];
+  WORDS.forEach((w, i) => {
+    if (!BANDS.length || BANDS[BANDS.length - 1][0] !== w.level) BANDS.push([w.level, 0]);
+    BANDS[BANDS.length - 1][1] = i + 1;
+  });
+
+  // Leitner intervals, measured in cards shown.
+  const GAP = [0, 3, 8, 25, 80, 250];
+  const KEY = "crackedAtSpanish.v1";
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  let S = { n: 0, next: 0, cards: {}, score: 0, streak: 0, best: 0, seen: 0, clean: 0,
+            day: "", days: 0, dSeen: 0, dClean: 0 };
+  try { Object.assign(S, JSON.parse(localStorage.getItem(KEY)) || {}); } catch {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} };
+
+  const $ = id => document.getElementById(id);
+  const input = $("answer"), wordEl = $("word"), revealEl = $("reveal");
+  let cur = -1, revealed = false;
+
+  function pick() {
+    // Most overdue review first, else a new word, else the soonest review.
+    let best = -1, bestDue = Infinity;
+    for (const k in S.cards) {
+      const i = +k, c = S.cards[k];
+      if (i !== cur && c.due < bestDue) { best = i; bestDue = c.due; }
+    }
+    if (best >= 0 && bestDue <= S.n) return best;
+    if (S.next < WORDS.length) return S.next;
+    return best >= 0 ? best : 0;
+  }
+
+  function show() {
+    cur = pick();
+    revealed = false;
+    wordEl.textContent = WORDS[cur].en;
+    revealEl.textContent = "";
+    input.value = "";
+    stats();
+  }
+
+  function mult() { return S.streak >= 20 ? 4 : S.streak >= 10 ? 3 : S.streak >= 5 ? 2 : 1; }
+
+  function stats() {
+    const known = Object.values(S.cards).filter(c => c.box >= 4).length;
+    // Level = band you're working through, based on how many words you know.
+    let lvl = "B2 ✓";
+    for (const [name, end] of BANDS) if (known < end) { lvl = name; break; }
+    const acc = S.seen ? Math.round(100 * S.clean / S.seen) : 100;
+    const dacc = S.dSeen ? Math.round(100 * S.dClean / S.dSeen) : 100;
+    $("stats").innerHTML =
+      `<b>${S.score}</b> pts · streak <b>${S.streak}</b>${mult() > 1 ? " ×" + mult() : ""} (best ${S.best}) · ` +
+      `acc <b>${acc}%</b> (today ${dacc}%) · <b>${lvl}</b> ${known}/${WORDS.length} · 🔥${S.days}d`;
+  }
+
+  function doReveal() {
+    if (revealed) return;
+    revealed = true;
+    revealEl.textContent = WORDS[cur].es.join(" / ");
+    S.streak = 0;
+    stats();
+    input.focus();
+  }
+
+  function correct() {
+    const d = today();
+    if (S.day !== d) {
+      const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+      S.days = S.day === y ? S.days + 1 : 1;
+      S.day = d; S.dSeen = 0; S.dClean = 0;
+    }
+    S.n++; S.seen++; S.dSeen++;
+    const isNew = !(cur in S.cards);
+    if (isNew) S.next = Math.max(S.next, cur + 1);
+    let box;
+    if (revealed) box = 1;
+    else {
+      S.clean++; S.dClean++;
+      S.streak++; S.best = Math.max(S.best, S.streak);
+      const gain = 10 * mult();
+      S.score += gain;
+      popup("+" + gain);
+      box = isNew ? 3 : Math.min(5, S.cards[cur].box + 1);
+    }
+    S.cards[cur] = { box, due: S.n + GAP[box] };
+    save();
+    input.classList.add("ok");
+    setTimeout(() => input.classList.remove("ok"), 200);
+    show();
+  }
+
+  function popup(t) {
+    const p = $("pop"), r = input.getBoundingClientRect();
+    p.textContent = t;
+    p.style.left = (r.right - 50) + "px";
+    p.style.top = (r.top - 10) + "px";
+    p.classList.remove("go"); void p.offsetWidth; p.classList.add("go");
+  }
+
+  input.addEventListener("input", () => {
+    if (WORDS[cur].keys.includes(norm(input.value))) correct();
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") doReveal(); });
+  wordEl.addEventListener("click", doReveal);
+  document.addEventListener("click", e => { if (e.target.id !== "reset") input.focus(); });
+  $("reset").addEventListener("click", () => {
+    if (confirm("Reset all progress?")) { try { localStorage.removeItem(KEY); } catch {} location.reload(); }
+  });
+
+  show();
+  input.focus();
+</script>
+</body>
+</html>
