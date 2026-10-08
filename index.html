@@ -69,7 +69,6 @@
   });
 
   // Leitner intervals, measured in cards shown.
-  const GAP = [0, 3, 8, 25, 80, 250];
   const KEY = "crackedAtSpanish.v1";
   const today = () => new Date().toISOString().slice(0, 10);
 
@@ -82,21 +81,18 @@
   const input = $("answer"), wordEl = $("word"), revealEl = $("reveal");
   let cur = -1, revealed = false;
 
-  function pick() {
-    // Most overdue review first, else a new word, else the soonest review.
-    let best = -1, bestDue = Infinity;
-    for (const k in S.cards) {
-      const i = +k, c = S.cards[k];
-      if (i !== cur && c.due < bestDue) { best = i; bestDue = c.due; }
-    }
-    if (best >= 0 && bestDue <= S.n) return best;
-    if (S.next < WORDS.length) return S.next;
-    return best >= 0 ? best : 0;
-  }
+  // Each word is shown once, in frequency order. No reviews.
+  function pick() { return S.next; }
 
   function show() {
     cur = pick();
     revealed = false;
+    if (cur >= WORDS.length) {
+      wordEl.textContent = "All words done 🎉";
+      input.disabled = true;
+      stats();
+      return;
+    }
     wordEl.textContent = WORDS[cur].en;
     revealEl.textContent = "";
     input.value = "";
@@ -106,7 +102,7 @@
   function mult() { return S.streak >= 20 ? 4 : S.streak >= 10 ? 3 : S.streak >= 5 ? 2 : 1; }
 
   function stats() {
-    const known = Object.values(S.cards).filter(c => c.box >= 4).length;
+    const known = Object.values(S.cards).filter(c => c.box >= 3).length;
     // Level = band you're working through, based on how many words you know.
     let lvl = "B2 ✓";
     for (const [name, end] of BANDS) if (known < end) { lvl = name; break; }
@@ -134,19 +130,16 @@
       S.day = d; S.dSeen = 0; S.dClean = 0;
     }
     S.n++; S.seen++; S.dSeen++;
-    const isNew = !(cur in S.cards);
-    if (isNew) S.next = Math.max(S.next, cur + 1);
-    let box;
-    if (revealed) box = 1;
-    else {
+    S.next = cur + 1;
+    if (!revealed) {
       S.clean++; S.dClean++;
       S.streak++; S.best = Math.max(S.best, S.streak);
       const gain = 10 * mult();
       S.score += gain;
       popup("+" + gain);
-      box = isNew ? 3 : Math.min(5, S.cards[cur].box + 1);
     }
-    S.cards[cur] = { box, due: S.n + GAP[box] };
+    // Known = answered without revealing.
+    S.cards[cur] = { box: revealed ? 1 : 3 };
     save();
     input.classList.add("ok");
     setTimeout(() => input.classList.remove("ok"), 200);
@@ -162,7 +155,7 @@
   }
 
   input.addEventListener("input", () => {
-    if (WORDS[cur].keys.includes(norm(input.value))) correct();
+    if (WORDS[cur] && WORDS[cur].keys.includes(norm(input.value))) correct();
   });
   document.addEventListener("keydown", e => { if (e.key === "Escape") doReveal(); });
   wordEl.addEventListener("click", doReveal);
