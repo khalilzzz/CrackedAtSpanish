@@ -122,6 +122,25 @@
       }
     }
 
+    #wrong {
+      position: fixed;
+      bottom: 10px;
+      left: 14px;
+      font: inherit;
+      font-size: 13px;
+      color: var(--fg);
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+
+    #wrong:disabled {
+      color: var(--dim);
+      cursor: default;
+    }
+
     #reset {
       position: fixed;
       bottom: 10px;
@@ -140,6 +159,7 @@
   <input id="answer" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
     placeholder="esc = reveal">
   <div id="pop"></div>
+  <button id="wrong"></button>
   <div id="reset">reset</div>
 
   <script>
@@ -174,27 +194,42 @@
       BANDS[BANDS.length - 1][1] = i + 1;
     });
 
-    // Leitner intervals, measured in cards shown.
     const KEY = "crackedAtSpanish.v1";
     const today = () => new Date().toISOString().slice(0, 10);
 
     let S = {
       n: 0, next: 0, cards: {}, score: 0, streak: 0, best: 0, seen: 0, clean: 0,
-      day: "", days: 0, dSeen: 0, dClean: 0
+      day: "", days: 0, dSeen: 0, dClean: 0, wrong: null
     };
     try { Object.assign(S, JSON.parse(localStorage.getItem(KEY)) || {}); } catch { }
+    // "Got it wrong" list: indexes of words revealed with Esc. Older saves: rebuild it from cards.
+    if (!Array.isArray(S.wrong)) S.wrong = Object.keys(S.cards).filter(k => S.cards[k].box === 1).map(Number);
     const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { } };
 
     const $ = id => document.getElementById(id);
     const input = $("answer"), wordEl = $("word"), revealEl = $("reveal");
     let cur = -1, revealed = false;
+    // Review mode: one pass over the "got it wrong" words, each shown once.
+    let review = null;
 
-    // Each word is shown once, in frequency order. No reviews.
-    function pick() { return S.next; }
+    // New words: each shown once, in frequency order.
+    function pick() { return review ? review[0] : S.next; }
+
+    function startReview() {
+      if (review) { review = null; show(); return; }
+      if (!S.wrong.length) return;
+      review = [...S.wrong];
+      show();
+    }
 
     function show() {
+      if (review && !review.length) review = null;
       cur = pick();
       revealed = false;
+      revealEl.textContent = "";
+      input.value = "";
+      input.disabled = false;
+      wrongBtn();
       if (cur >= WORDS.length) {
         wordEl.textContent = "All words done 🎉";
         input.disabled = true;
@@ -202,9 +237,14 @@
         return;
       }
       wordEl.textContent = WORDS[cur].en;
-      revealEl.textContent = "";
-      input.value = "";
       stats();
+    }
+
+    function wrongBtn() {
+      const b = $("wrong");
+      if (review) b.textContent = `← new words · ${review.length} left to review`;
+      else b.textContent = `got it wrong (${S.wrong.length}) · review`;
+      b.disabled = !review && !S.wrong.length;
     }
 
     function mult() { return S.streak >= 20 ? 4 : S.streak >= 10 ? 3 : S.streak >= 5 ? 2 : 1; }
@@ -225,6 +265,9 @@
       revealed = true;
       revealEl.textContent = WORDS[cur].es.join(" / ");
       S.streak = 0;
+      if (!S.wrong.includes(cur)) S.wrong.push(cur);
+      save();
+      wrongBtn();
       stats();
       input.focus();
     }
@@ -237,7 +280,11 @@
         S.day = d; S.dSeen = 0; S.dClean = 0;
       }
       S.n++; S.seen++; S.dSeen++;
-      S.next = cur + 1;
+      if (review) {
+        review.shift();
+        // Typed it without revealing: memorized, drop it from the wrong list.
+        if (!revealed) S.wrong = S.wrong.filter(i => i !== cur);
+      } else S.next = cur + 1;
       if (!revealed) {
         S.clean++; S.dClean++;
         S.streak++; S.best = Math.max(S.best, S.streak);
@@ -266,6 +313,7 @@
     });
     document.addEventListener("keydown", e => { if (e.key === "Escape") doReveal(); });
     wordEl.addEventListener("click", doReveal);
+    $("wrong").addEventListener("click", startReview);
     document.addEventListener("click", e => { if (e.target.id !== "reset") input.focus(); });
     $("reset").addEventListener("click", () => {
       if (confirm("Reset all progress?")) { try { localStorage.removeItem(KEY); } catch { } location.reload(); }
